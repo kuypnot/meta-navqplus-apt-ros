@@ -113,10 +113,16 @@ jobs:
         BB_NUMBER_THREADS: "2"
         PARALLEL_MAKE: "-j 2"
       run: |
-        set -euo pipefail
-        # Source the Yocto init inside a subshell that tolerates 'unset' reads
-        ( set +u; source "${{ github.workspace }}/yocto-sources/poky/oe-init-build-env" builddir )
-        echo "Yocto build env initialized; now running bitbake imx-image-desktop-imx8mpnavq"
+        set -e
+        echo "Sourcing oe-init-build-env..."
+        set +u
+        source "${{ github.workspace }}/yocto-sources/poky/oe-init-build-env" builddir
+        set -u
+
+        echo "Environment initialized. bitbake version:"
+        which bitbake || echo "bitbake not found in PATH"
+
+        echo "Building imx-image-desktop-imx8mpnavq..."
         bitbake imx-image-desktop-imx8mpnavq 2>&1 | tee build.log || true
 
     - name: Print build summary (tail)
