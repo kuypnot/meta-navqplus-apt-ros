@@ -20,15 +20,50 @@ jobs:
         ref: imx-6.1.22-humble
         fetch-depth: 1
 
-    - name: Install apt build deps
+    - name: Install apt build deps (robust)
       run: |
+        set -euo pipefail
         sudo apt-get update
-        sudo apt-get install -y --no-install-recommends \
-          gawk wget git-core diffstat unzip texinfo gcc-multilib \
-          build-essential chrpath socat cpio python3 python3-pip \
-          python3-pexpect xz-utils debianutils iputils-ping python3-git \
-          python3-jinja2 libegl1-mesa libsdl1.2-dev pylint3 rsync locales \
-          zstd bc procps
+
+        # base list that is stable across ubuntu versions
+        BASE_PKGS=(
+          gawk wget git-core diffstat unzip texinfo gcc-multilib
+          build-essential chrpath socat cpio python3 python3-pip
+          python3-pexpect xz-utils debianutils iputils-ping python3-git
+          python3-jinja2 libsdl1.2-dev rsync locales zstd bc procps
+        )
+
+        # packages that may have different names across Ubuntu releases;
+        # each entry is a space-separated list of candidates; the first available is used
+        declare -A CANDIDATES
+        CANDIDATES[libegl]="libegl1-mesa libegl-mesa0 libegl1"
+        CANDIDATES[pylint]="pylint3 python3-pylint pylint"
+
+        # build the final package list
+        PKGS=("${BASE_PKGS[@]}")
+
+        for key in "${!CANDIDATES[@]}"; do
+          avail=""
+          for name in ${CANDIDATES[$key]}; do
+            if apt-cache show "$name" >/dev/null 2>&1; then
+              avail="$name"
+              break
+            fi
+          done
+          if [ -n "$avail" ]; then
+            PKGS+=("$avail")
+            echo "Selected package for $key -> $avail"
+          else
+            echo "ERROR: None of candidate packages for $key are available: ${CANDIDATES[$key]}"
+            exit 1
+          fi
+        done
+
+        echo "Final apt packages to install:"
+        printf '%s\n' "${PKGS[@]}"
+
+        # install
+        sudo apt-get install -y --no-install-recommends "${PKGS[@]}"
 
     - name: Prepare workspace (clone poky & layers)
       run: |
