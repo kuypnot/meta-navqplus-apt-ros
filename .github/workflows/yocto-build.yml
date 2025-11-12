@@ -113,17 +113,55 @@ jobs:
         BB_NUMBER_THREADS: "2"
         PARALLEL_MAKE: "-j 2"
       run: |
-        set -e
-        echo "Sourcing oe-init-build-env..."
+        set -euo pipefail
+    
+        WORKSPACE="${{ github.workspace }}"
+        POKY="${WORKSPACE}/yocto-sources/poky"
+        OE_INIT="${POKY}/oe-init-build-env"
+    
+        echo "Sourcing oe-init-build-env from: $OE_INIT"
+        if [ ! -f "$OE_INIT" ]; then
+          echo "ERROR: oe-init-build-env not found at $OE_INIT"
+          exit 1
+        fi
+    
+        # source in current shell (disable nounset only while sourcing)
         set +u
-        source "${{ github.workspace }}/yocto-sources/poky/oe-init-build-env" builddir
+        source "$OE_INIT" builddir
         set -u
-
-        echo "Environment initialized. bitbake version:"
-        which bitbake || echo "bitbake not found in PATH"
-
-        echo "Building imx-image-desktop-imx8mpnavq..."
+    
+        # ensure builddir/conf exists (oe-init-build-env usually created it)
+        mkdir -p builddir/conf
+    
+        # Append safe overrides to local.conf so machine/distro are set and .wic is generated
+        cat >> builddir/conf/local.conf <<'EOF'
+        # Overrides added by CI to ensure desired image types & machine/distro
+        MACHINE = "imx8mpnavq"
+        # nxp-lx is the distro expected by meta-navqplus layers; if missing change to your distro
+        DISTRO = "nxp-lx"
+        
+        # Ensure WIC images are produced
+        IMAGE_FSTYPES += "wic wic.zst"
+        
+        # keep parallel settings consistent
+        BB_NUMBER_THREADS = "2"
+        PARALLEL_MAKE = "-j 2"
+        EOF
+    
+        echo "=== local.conf preview ==="
+        tail -n +1 builddir/conf/local.conf | sed -n '1,200p'
+    
+        echo "=== Layer and distro sanity checks ==="
+        bitbake-layers show-layers || true
+        bitbake-layers show-recipes | grep imx-image || true
+    
+        echo "Starting bitbake for imx-image-desktop-imx8mpnavq..."
         bitbake imx-image-desktop-imx8mpnavq 2>&1 | tee build.log || true
+    
+        echo "Build finished — check builddir/tmp/deploy/images for .wic files"
+        ls -la builddir/tmp/deploy/images || true
+        ls -la builddir/tmp/deploy/images/imx8mpnavq || true
+
 
     - name: Print build summary (tail)
       if: always()
