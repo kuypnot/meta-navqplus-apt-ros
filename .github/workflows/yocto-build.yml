@@ -65,29 +65,6 @@ jobs:
         # install
         sudo apt-get install -y --no-install-recommends "${PKGS[@]}"
 
-    - name: Prepare workspace (clone poky & layers)
-      run: |
-        set -euo pipefail
-        mkdir -p yocto-sources
-        cd yocto-sources
-        # Use safe default branches; adjust if upstream requires other release
-        if [ ! -d poky ]; then git clone -b honister https://git.yoctoproject.org/git/poky.git poky; fi
-        if [ ! -d meta-openembedded ]; then git clone -b honister https://github.com/openembedded/meta-openembedded.git meta-openembedded; fi
-        if [ ! -d meta-freescale ]; then git clone https://github.com/Freescale/meta-freescale.git meta-freescale; fi
-        cd ..
-
-    - name: Prepare environment
-      run: |
-        # Set up the Yocto environment
-        source yocto-sources/poky/oe-init-build-env builddir
-        echo "Yocto build environment initialized."
-
-    - name: Show available image recipes (sanity check)
-      run: |
-        source yocto-sources/poky/oe-init-build-env builddir
-        echo "Listing available imx-image-* recipes:"
-        bitbake-layers show-recipes | grep imx-image || true
-
     - name: Build NavQ+ desktop image (produces .wic)
       env:
         MACHINE: imx8mpnavq
@@ -96,8 +73,11 @@ jobs:
         PARALLEL_MAKE: "-j 2"
       run: |
         set -euo pipefail
-        source yocto-sources/poky/oe-init-build-env builddir
-        echo "Building imx-image-desktop-imx8mpnavq..."
+
+        # temporarily disable nounset only while sourcing the Yocto init script
+        ( set +u; source yocto-sources/poky/oe-init-build-env builddir )
+
+        echo "Yocto build env initialized. Running bitbake..."
         bitbake imx-image-desktop-imx8mpnavq 2>&1 | tee build.log
 
         # ensure builddir exists; script will use 'builddir' inside repo
