@@ -1,4 +1,4 @@
-name: Yocto build - NavQPlus (.wic) - with logs
+name: Yocto build - NavQPlus (.wic) - full workflow
 
 on:
   workflow_dispatch:
@@ -25,7 +25,6 @@ jobs:
         set -euo pipefail
         sudo apt-get update
 
-        # base list that is stable across ubuntu versions
         BASE_PKGS=(
           gawk wget git-core diffstat unzip texinfo gcc-multilib
           build-essential chrpath socat cpio python3 python3-pip
@@ -33,13 +32,10 @@ jobs:
           python3-jinja2 libsdl1.2-dev rsync locales zstd bc procps
         )
 
-        # packages that may have different names across Ubuntu releases;
-        # each entry is a space-separated list of candidates; the first available is used
         declare -A CANDIDATES
         CANDIDATES[libegl]="libegl1-mesa libegl-mesa0 libegl1"
         CANDIDATES[pylint]="pylint3 python3-pylint pylint"
 
-        # build the final package list
         PKGS=("${BASE_PKGS[@]}")
 
         for key in "${!CANDIDATES[@]}"; do
@@ -62,8 +58,53 @@ jobs:
         echo "Final apt packages to install:"
         printf '%s\n' "${PKGS[@]}"
 
-        # install
         sudo apt-get install -y --no-install-recommends "${PKGS[@]}"
+
+    - name: Prepare workspace (clone poky & layers)
+      run: |
+        set -euo pipefail
+        mkdir -p yocto-sources
+        cd yocto-sources
+
+        # clone poky and layers (adjust branches if your meta layer needs different release)
+        if [ ! -d poky ]; then
+          git clone -b honister https://git.yoctoproject.org/git/poky.git poky
+        fi
+
+        if [ ! -d meta-openembedded ]; then
+          git clone -b honister https://github.com/openembedded/meta-openembedded.git meta-openembedded
+        fi
+
+        if [ ! -d meta-freescale ]; then
+          git clone https://github.com/Freescale/meta-freescale.git meta-freescale
+        fi
+
+        cd ..
+
+    - name: Show repo and scripts
+      run: |
+        echo "Workspace: $GITHUB_WORKSPACE"
+        ls -la
+        ls -la scripts || true
+        ls -la yocto-sources/poky || true
+
+    - name: Initialize Yocto env & list image recipes
+      run: |
+        set -euo pipefail
+        # Make sure the poky init script exists
+        LS_PATH="${{ github.workspace }}/yocto-sources/poky/oe-init-build-env"
+        if [ ! -f "$LS_PATH" ]; then
+          echo "ERROR: oe-init-build-env not found at $LS_PATH"
+          echo "Contents of yocto-sources:"
+          ls -la "${{ github.workspace }}/yocto-sources" || true
+          exit 1
+        fi
+
+        # temporarily disable nounset only while sourcing the Yocto init script
+        ( set +u; source "${{ github.workspace }}/yocto-sources/poky/oe-init-build-env" builddir )
+
+        echo "Listing available imx-image-* recipes:"
+        bitbake-layers show-recipes | grep imx-image || true
 
     - name: Build NavQ+ desktop image (produces .wic)
       env:
@@ -73,40 +114,14 @@ jobs:
         PARALLEL_MAKE: "-j 2"
       run: |
         set -euo pipefail
-
-        # temporarily disable nounset only while sourcing the Yocto init script
-        ( set +u; source yocto-sources/poky/oe-init-build-env builddir )
-
-        echo "Yocto build env initialized. Running bitbake..."
-        bitbake imx-image-desktop-imx8mpnavq 2>&1 | tee build.log
-
-        # ensure builddir exists; script will use 'builddir' inside repo
-        ./scripts/build.sh 2>&1 | tee build.log || true
-        # always exit zero here so we can capture logs and upload artifacts; job will still be marked failed at the end if files missing
+        # Source the Yocto init inside a subshell that tolerates 'unset' reads
+        ( set +u; source "${{ github.workspace }}/yocto-sources/poky/oe-init-build-env" builddir )
+        echo "Yocto build env initialized; now running bitbake imx-image-desktop-imx8mpnavq"
+        bitbake imx-image-desktop-imx8mpnavq 2>&1 | tee build.log || true
 
     - name: Print build summary (tail)
       if: always()
       run: |
-        echo "=== LAST 200 LINES OF build.log ==="
-        tail -n 200 build.log || true
-        echo "=== LIST builddir/tmp/deploy/images/imx8mpnavq ==="
-        ls -la builddir/tmp/deploy/images/imx8mpnavq || true
-
-    - name: Upload build.log and Yocto logs
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: yocto-logs
-        path: |
-          build.log
-          builddir/tmp/log/*
-          builddir/tmp/deploy/images/imx8mpnavq || true
-
-    - name: Upload WIC artifacts (if present)
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: navq-wic
-        path: |
-          builddir/tmp/deploy/images/imx8mpnavq/*.wic*
-          builddir/tmp/deploy/images/imx8mpnavq/*.wic.zst
+        echo "=== LAST 300 LINES OF build.log ==="
+        tail -n 300 build.log || true
+        echo "=== LIST builddir/tmp/deploy/images/imx8mpnavq ===
