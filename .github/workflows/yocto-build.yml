@@ -19,7 +19,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         # use your fork or the upstream repo; this example checks out the upstream
-        repository: rudislabs/meta-navqplus-apt-ros
+        repository: kuypnot/meta-navqplus-apt-ros
         ref: imx-6.1.22-humble
         fetch-depth: 1
 
