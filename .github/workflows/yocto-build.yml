@@ -1,0 +1,95 @@
+name: Yocto build - NavQPlus (.wic)
+
+# Manual dispatch + on push to specific branches
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - imx-6.1.22-humble
+
+jobs:
+  yocto-build:
+    runs-on: ubuntu-latest
+    # You can increase timeout if the job is killed; modify in repo settings if needed.
+    timeout-minutes: 1440
+
+    steps:
+    - name: Checkout meta-navqplus sources
+      uses: actions/checkout@v4
+      with:
+        # use your fork or the upstream repo; this example checks out the upstream
+        repository: kuypnot/meta-navqplus-apt-ros
+        ref: imx-6.1.22-humble
+        fetch-depth: 1
+
+    - name: Show repo info
+      run: |
+        echo "Repo: $(pwd)"
+        ls -la
+
+    - name: Install apt build deps
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          gawk wget git-core diffstat unzip texinfo gcc-multilib \
+          build-essential chrpath socat cpio python3 python3-pip \
+          python3-pexpect xz-utils debianutils iputils-ping python3-git \
+          python3-jinja2 libegl1-mesa libsdl1.2-dev pylint3 rsync locales \
+          zstd bc
+
+    - name: Prepare workspace (clone poky & layers)
+      run: |
+        set -euo pipefail
+        mkdir -p yocto-sources
+        cd yocto-sources
+
+        # Pick branches/tags that match your layer requirements.
+        # Change branches here if you need a different Yocto release.
+        if [ ! -d poky ]; then
+          git clone -b honister https://git.yoctoproject.org/git/poky.git poky
+        fi
+
+        if [ ! -d meta-openembedded ]; then
+          git clone -b honister https://github.com/openembedded/meta-openembedded.git meta-openembedded
+        fi
+
+        if [ ! -d meta-freescale ]; then
+          git clone https://github.com/Freescale/meta-freescale.git meta-freescale
+        fi
+
+        # move out so build script finds expected layout
+        cd ..
+
+    - name: Make build script executable
+      run: |
+        chmod +x scripts/build.sh || true
+        ls -la scripts
+
+    - name: Run Yocto build script
+      env:
+        MACHINE: imx8mpnavq
+        DISTRO: nxp-lx
+        # adjust BB_NUMBER_THREADS / PARALLEL_MAKE if you have powerful self-hosted runners
+        BB_NUMBER_THREADS: "4"
+        PARALLEL_MAKE: "-j 4"
+      run: |
+        set -euo pipefail
+        ./scripts/build.sh 2>&1 | tee build.log
+      # Note: this step can be long and resource-heavy. Use self-hosted runner if you need faster build time.
+
+    - name: List deploy images
+      run: |
+        echo "Artifacts in builddir/tmp/deploy/images/imx8mpnavq:"
+        ls -la builddir/tmp/deploy/images/imx8mpnavq || true
+        # show the specific wic outputs if present
+        ls -la builddir/tmp/deploy/images/imx8mpnavq/*.wic* || true
+
+    - name: Upload WIC artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: navq-wic
+        path: |
+          builddir/tmp/deploy/images/imx8mpnavq/*.wic*
+          builddir/tmp/deploy/images/imx8mpnavq/*.wic.zst
