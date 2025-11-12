@@ -76,12 +76,19 @@ jobs:
         if [ ! -d meta-freescale ]; then git clone https://github.com/Freescale/meta-freescale.git meta-freescale; fi
         cd ..
 
-    - name: Make build script executable
+    - name: Prepare environment
       run: |
-        chmod +x scripts/build.sh || true
-        ls -la scripts
+        # Set up the Yocto environment
+        source yocto-sources/poky/oe-init-build-env builddir
+        echo "Yocto build environment initialized."
 
-    - name: Run Yocto build script (capture output to build.log)
+    - name: Show available image recipes (sanity check)
+      run: |
+        source yocto-sources/poky/oe-init-build-env builddir
+        echo "Listing available imx-image-* recipes:"
+        bitbake-layers show-recipes | grep imx-image || true
+
+    - name: Build NavQ+ desktop image (produces .wic)
       env:
         MACHINE: imx8mpnavq
         DISTRO: nxp-lx
@@ -89,6 +96,10 @@ jobs:
         PARALLEL_MAKE: "-j 2"
       run: |
         set -euo pipefail
+        source yocto-sources/poky/oe-init-build-env builddir
+        echo "Building imx-image-desktop-imx8mpnavq..."
+        bitbake imx-image-desktop-imx8mpnavq 2>&1 | tee build.log
+
         # ensure builddir exists; script will use 'builddir' inside repo
         ./scripts/build.sh 2>&1 | tee build.log || true
         # always exit zero here so we can capture logs and upload artifacts; job will still be marked failed at the end if files missing
